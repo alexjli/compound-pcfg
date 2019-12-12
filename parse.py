@@ -17,6 +17,8 @@ from utils import *
 import re
 import pickle
 
+from parallel import BetterDataParallel
+
 parser = argparse.ArgumentParser()
 
 # Data path options
@@ -27,7 +29,7 @@ parser.add_argument('--out_file', default='pred-parse.txt')
 parser.add_argument('--use_mean', default=1, type=int, help='use mean from q if = 1')
 parser.add_argument('--gpu', default=0, type=int, help='which gpu to use')
 
-def clean_number(w):    
+def clean_number(w):
     new_w = re.sub('[0-9]{1,}([,.]?[0-9]*)*', 'N', w)
     return new_w
   
@@ -38,6 +40,10 @@ def main(args):
   cuda.set_device(args.gpu)
   model.eval()
   model.cuda()
+  
+  # model parallelize
+  model = BetterDataParallel(model)
+
   word2idx = checkpoint['word2idx']
   pred_out = open(args.out_file, "w")
   with torch.no_grad():

@@ -18,6 +18,8 @@ from utils import *
 from models import CompPCFG
 from torch.nn.init import xavier_uniform_
 
+from parallel import BetterDataParallel
+
 parser = argparse.ArgumentParser()
 
 # Data path options
@@ -74,6 +76,10 @@ def main(args):
   print(model)
   model.train()
   model.cuda()
+
+  # model parallelize
+  model = BetterDataParallel(model)
+
   optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas = (args.beta1, args.beta2))
   best_val_ppl = 1e5
   best_val_f1 = 0
@@ -147,6 +153,7 @@ def main(args):
 
 def eval(data, model):
   model.eval()
+  # no need to parallelize because input model should be parallel
   num_sents = 0
   num_words = 0
   total_nll = 0.

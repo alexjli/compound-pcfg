@@ -16,6 +16,8 @@ import time
 from utils import *
 import re
 
+from parallel import BetterDataParallel
+
 parser = argparse.ArgumentParser()
 
 # Data path options
@@ -117,6 +119,10 @@ def main(args):
   cuda.set_device(args.gpu)
   model.eval()
   model.cuda()
+
+  # model parallelize
+  model = BetterDataParallel(model)
+
   total_kl = 0.
   total_nll = 0.
   num_sents = 0
