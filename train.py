@@ -57,8 +57,13 @@ def main(args):
   torch.manual_seed(args.seed)
   train_data = Dataset(args.train_file)
   val_data = Dataset(args.val_file)
+  
+  
+  # Alex addition: use torch dataloaders
   train_loader = DataLoader(dataset=train_data, shuffle=True)
   val_loader = DataLoader(dataset=val_data, shuffle=True)
+  
+
   train_sents = train_data.batch_size.sum()
   vocab_size = int(train_data.vocab_size)
   max_len = max(val_data.sents.size(1), train_data.sents.size(1))
@@ -76,8 +81,12 @@ def main(args):
                    z_dim = args.z_dim,
                    prior = args.prior,
                    vpost = args.vpost)
-  # model parallelize
+  
+  
+  # Tong addition: model parallelize
   model = BetterDataParallel(model)
+  
+  
   for name, param in model.named_parameters():
     if param.dim() > 1:
       xavier_uniform_(param)

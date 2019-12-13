@@ -116,12 +116,13 @@ def main(args):
   print('loading model from ' + args.model_file)
   checkpoint = torch.load(args.model_file)
   model = checkpoint['model']
+  model = BetterDataParallel(model)
+  
   cuda.set_device(args.gpu)
   model.eval()
   model.cuda()
 
   # model parallelize
-  model = BetterDataParallel(model)
 
   total_kl = 0.
   total_nll = 0.
