@@ -104,43 +104,43 @@ def get_actions(line):
 
   
 def main(args):
-  corpus_f1 = [0., 0., 0.] 
-  sent_f1 = [] 
-  with torch.no_grad():
-    for k, (tree1, tree2) in enumerate(zip(open(args.tree1, "r"), open(args.tree2))):
-      tree1 = tree1.strip()
-      action1 = get_actions(tree1)
-      tags1, sent1, sent_lower1 = get_tags_tokens_lowercase(tree1)
-      if len(sent1) > args.length_cutoff or len(sent1) == 1:
-          continue
-      gold_span1, binary_actions1, nonbinary_actions1 = get_nonbinary_spans(action1)
-      tree2 = tree2.strip()
-      action2 = get_actions(tree2)
-      tags2, sent2, sent_lower2 = get_tags_tokens_lowercase(tree2)
-      gold_span2, binary_actions2, nonbinary_actions2 = get_nonbinary_spans(action2)
-      pred_span_set = set(gold_span2[:-1]) #the last span in the list is always the
-      gold_span_set = set(gold_span1[:-1]) #trival sent-level span so we ignore it
-      tp, fp, fn = get_stats(pred_span_set, gold_span_set) 
-      corpus_f1[0] += tp
-      corpus_f1[1] += fp
-      corpus_f1[2] += fn
-      # sent-level F1 is based on L83-89 from https://github.com/yikangshen/PRPN/test_phrase_grammar.py
-      overlap = pred_span_set.intersection(gold_span_set)
-      prec = float(len(overlap)) / (len(pred_span_set) + 1e-8)
-      reca = float(len(overlap)) / (len(gold_span_set) + 1e-8)
-      if len(gold_span_set) == 0:
-          reca = 1.
-          if len(pred_span_set) == 0:              
-              prec = 1.
-      f1 = 2 * prec * reca / (prec + reca + 1e-8)
-      sent_f1.append(f1)
-  tp, fp, fn = corpus_f1  
-  prec = tp / (tp + fp)
-  recall = tp / (tp + fn)
-  corpus_f1 = 2*prec*recall/(prec+recall) if prec+recall > 0 else 0.
-  print('Corpus F1: %.2f, Sentence F1: %.2f' %
-        (corpus_f1*100, np.mean(np.array(sent_f1))*100))
+    corpus_f1 = [0., 0., 0.] 
+    sent_f1 = [] 
+    with torch.no_grad():
+        for k, (tree1, tree2) in enumerate(zip(open(args.tree1, "r"), open(args.tree2))):
+            tree1 = tree1.strip()
+            action1 = get_actions(tree1)
+            tags1, sent1, sent_lower1 = get_tags_tokens_lowercase(tree1)
+            if len(sent1) > args.length_cutoff or len(sent1) == 1:
+                    continue
+            gold_span1, binary_actions1, nonbinary_actions1 = get_nonbinary_spans(action1)
+            tree2 = tree2.strip()
+            action2 = get_actions(tree2)
+            tags2, sent2, sent_lower2 = get_tags_tokens_lowercase(tree2)
+            gold_span2, binary_actions2, nonbinary_actions2 = get_nonbinary_spans(action2)
+            pred_span_set = set(gold_span2[:-1]) #the last span in the list is always the
+            gold_span_set = set(gold_span1[:-1]) #trival sent-level span so we ignore it
+            tp, fp, fn = get_stats(pred_span_set, gold_span_set) 
+            corpus_f1[0] += tp
+            corpus_f1[1] += fp
+            corpus_f1[2] += fn
+            # sent-level F1 is based on L83-89 from https://github.com/yikangshen/PRPN/test_phrase_grammar.py
+            overlap = pred_span_set.intersection(gold_span_set)
+            prec = float(len(overlap)) / (len(pred_span_set) + 1e-8)
+            reca = float(len(overlap)) / (len(gold_span_set) + 1e-8)
+            if len(gold_span_set) == 0:
+                    reca = 1.
+                    if len(pred_span_set) == 0:              
+                            prec = 1.
+            f1 = 2 * prec * reca / (prec + reca + 1e-8)
+            sent_f1.append(f1)
+    tp, fp, fn = corpus_f1  
+    prec = tp / (tp + fp)
+    recall = tp / (tp + fn)
+    corpus_f1 = 2*prec*recall/(prec+recall) if prec+recall > 0 else 0.
+    print('Corpus F1: %.2f, Sentence F1: %.2f' %
+                (corpus_f1*100, np.mean(np.array(sent_f1))*100))
 
 if __name__ == '__main__':
-  args = parser.parse_args()
-  main(args)
+    args = parser.parse_args()
+    main(args)
