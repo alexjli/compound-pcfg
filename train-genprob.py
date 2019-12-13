@@ -18,8 +18,6 @@ from utils import *
 from models import GeneralCompPCFG
 from torch.nn.init import xavier_uniform_
 
-from parallel import BetterDataParallel
-
 parser = argparse.ArgumentParser()
 
 # Data path options
@@ -52,8 +50,9 @@ parser.add_argument('--prior', type = str, default = "normal", help='prior from 
 parser.add_argument('--vpost', type = str, default = "normal", help='distribution used to approximate variational posterior')
 
 def main(args):
-  np.random.seed(args.seed)
-  torch.manual_seed(args.seed)
+  if args.seed != -1:
+      np.random.seed(args.seed)
+      torch.manual_seed(args.seed)
   train_data = Dataset(args.train_file)
   val_data = Dataset(args.val_file)
   train_sents = train_data.batch_size.sum()
@@ -73,8 +72,6 @@ def main(args):
                    z_dim = args.z_dim,
                    prior = args.prior,
                    vpost = args.vpost)
-  # model parallelize
-  model = BetterDataParallel(model)
   for name, param in model.named_parameters():
     if param.dim() > 1:
       xavier_uniform_(param)
@@ -155,7 +152,6 @@ def main(args):
 
 def eval(data, model):
   model.eval()
-  # no need to parallelize because input model should be parallel
   num_sents = 0
   num_words = 0
   total_nll = 0.
