@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 import numpy as np
 import torch
+from torch.utils.data import Dataset as TDS
 import pickle
 
-class Dataset(object):
+class Dataset(TBS):
   def __init__(self, data_file):
     data = pickle.load(open(data_file, 'rb')) #get text data
     self.sents = self._convert(data['source']).long()
@@ -36,6 +37,6 @@ class Dataset(object):
     spans = [d[5] for d in other_data]
     batch_size = self.batch_size[idx].item()
     # original data includes </s>, which we don't need
-    data_batch = [sents[:, 1:length-1], length-2, batch_size, actions, 
+    data_batch = [sents[:, 1:length-1], length-2, batch_size, actions,
                   spans, binary_tree, other_data]
     return data_batch

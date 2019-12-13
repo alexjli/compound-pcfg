@@ -14,6 +14,7 @@ import numpy as np
 import time
 import logging
 from data import Dataset
+from torch.utils.data import DataLoader
 from utils import *
 from models import GeneralCompPCFG
 from torch.nn.init import xavier_uniform_
@@ -56,6 +57,8 @@ def main(args):
   torch.manual_seed(args.seed)
   train_data = Dataset(args.train_file)
   val_data = Dataset(args.val_file)
+  train_loader = DataLoader(dataset=train_data, shuffle=True)
+  val_loader = DataLoader(dataset=val_data, shuffle=True)
   train_sents = train_data.batch_size.sum()
   vocab_size = int(train_data.vocab_size)
   max_len = max(val_data.sents.size(1), train_data.sents.size(1))
@@ -96,9 +99,9 @@ def main(args):
     num_words = 0.
     all_stats = [[0., 0., 0.]]
     b = 0
-    for i in np.random.permutation(len(train_data)):
+    for train_batch in train_data:
       b += 1
-      sents, length, batch_size, _, gold_spans, gold_binary_trees, _ = train_data[i]
+      sents, length, batch_size, _, gold_spans, gold_binary_trees, _ = train_batch
       if length > args.max_length or length == 1: #length filter based on curriculum
         continue
       sents = sents.cuda()
@@ -138,7 +141,7 @@ def main(args):
     args.max_length = min(args.final_max_length, args.max_length + args.len_incr)
     print('--------------------------------')
     print('Checking validation perf...')
-    val_ppl, val_f1 = eval(val_data, model)
+    val_ppl, val_f1 = eval(val_loader, model)
     print('--------------------------------')
     if val_ppl < best_val_ppl:
       best_val_ppl = val_ppl
@@ -163,8 +166,8 @@ def eval(data, model):
   corpus_f1 = [0., 0., 0.]
   sent_f1 = []
   with torch.no_grad():
-    for i in range(len(data)):
-      sents, length, batch_size, _, gold_spans, gold_binary_trees, other_data = data[i]
+    for eval_batch in data:
+      sents, length, batch_size, _, gold_spans, gold_binary_trees, other_data = eval_batch
       if length == 1:
         continue
       sents = sents.cuda()
