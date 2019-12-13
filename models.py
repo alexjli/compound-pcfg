@@ -98,8 +98,7 @@ class CompPCFG(nn.Module):
             z_expand = z.unsqueeze(1).expand(batch_size, n, self.z_dim)
             z_expand = z_expand.unsqueeze(2).expand(batch_size, n, self.t_states, self.z_dim)
             t_emb = torch.cat([t_emb, z_expand], 3)
-            nt_emb = torch.cat([nt_emb, z.unsqueeze(1).expand(batch_size, self.nt_states,
-                                                                                                                 self.z_dim)], 2)
+            nt_emb = torch.cat([nt_emb, z.unsqueeze(1).expand(batch_size, self.nt_states, self.z_dim)], 2)
         root_scores = F.log_softmax(self.root_mlp(root_emb), 1)
         unary_scores = F.log_softmax(self.vocab_mlp(t_emb), 3)
         x_expand = x.unsqueeze(2).expand(batch_size, x.size(1), self.t_states).unsqueeze(3)

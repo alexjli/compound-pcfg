@@ -71,7 +71,21 @@ def main(args):
                 (train_data.sents.size(0), len(train_data), val_data.sents.size(0), len(val_data)))
     print('Vocab size: %d, Max Sent Len: %d' % (vocab_size, max_len))
     print('Save Path', args.save_path)
-    cuda.set_device(args.gpu)
+    
+
+    # Tong: I'm pretty sure this vvv is bad torch practice -- don't know if it works on multi gpu
+    # cuda.set_device(args.gpu) 
+    # recommend this vvv instead
+    base_gpu = torch.device('cuda:0')
+
+
+    # Checking gpu usage
+    # print(torch.cuda.memory_allocated(device='cuda:0'))
+    # print(torch.cuda.memory_allocated(device='cuda:1'))
+    # print(torch.cuda.memory_allocated(device='cuda:2'))
+    # print(torch.cuda.memory_allocated(device='cuda:3'))
+
+
     model = GeneralCompPCFG(vocab = vocab_size,
                                      state_dim = args.state_dim,
                                      t_states = args.t_states,
@@ -84,6 +98,7 @@ def main(args):
     
     
     # Tong addition: model parallelize
+    model.to(base_gpu)
     model = BetterDataParallel(model)
     
     
@@ -93,7 +108,12 @@ def main(args):
     print("model architecture")
     print(model)
     model.train()
-    model.cuda()
+
+
+    # Tong addition: comment this line out vvvv
+    # model.cuda()
+    
+
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas = (args.beta1, args.beta2))
     best_val_ppl = 1e5
     best_val_f1 = 0
@@ -108,12 +128,22 @@ def main(args):
         num_words = 0.
         all_stats = [[0., 0., 0.]]
         b = 0
+
+
+        # Alex addition: changed how this loop works
         for train_batch in train_data:
+
+
             b += 1
             sents, length, batch_size, _, gold_spans, gold_binary_trees, _ = train_batch
             if length > args.max_length or length == 1: #length filter based on curriculum
                 continue
-            sents = sents.cuda()
+
+            # Tong addition: comment this line out vvvv
+            # sents = sents.cuda()
+            # recommend this instead vvvv
+            sents = sents.to(base_gpu)
+
             optimizer.zero_grad()
             nll, kl, binary_matrix, argmax_spans = model(sents, argmax=True)
             (nll+kl).mean().backward()
@@ -157,13 +187,22 @@ def main(args):
             best_val_f1 = val_f1
             checkpoint = {
                 'args': args.__dict__,
-                'model': model.cpu(),
+
+
+                # Tong addition: replaced line
+                # 'model': model.cpu(),
+                'model': model.to('cpu'),
+                
+
                 'word2idx': train_data.word2idx,
                 'idx2word': train_data.idx2word
             }
             print('Saving checkpoint to %s' % args.save_path)
             torch.save(checkpoint, args.save_path)
-            model.cuda()
+            
+            # Tong addition: replaced line
+            # model.cuda()
+            model.to(base_gpu)
 
 def eval(data, model):
     model.eval()
