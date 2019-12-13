@@ -4,7 +4,7 @@ import torch
 from torch.utils.data import Dataset as TDS
 import pickle
 
-class Dataset(TBS):
+class Dataset(TDS):
   def __init__(self, data_file):
     data = pickle.load(open(data_file, 'rb')) #get text data
     self.sents = self._convert(data['source']).long()
