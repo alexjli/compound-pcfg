@@ -109,7 +109,7 @@ def main(args):
             num_sents += batch_size
             num_words += batch_size * (length + 1) # we implicitly generate </s> so we explicitly count it
             for bb in range(batch_size):
-                span_b = [(a[0], a[1]) for a in argmax_spans[bb]] #ignore labels
+                span_b = [(a[0].item(), a[1].item()) for a in argmax_spans[bb]] #ignore labels
                 span_b_set = set(span_b[:-1])
                 update_stats(span_b_set, [set(gold_spans[bb][:-1])], all_stats)
             if b % args.print_every == 0:
@@ -173,7 +173,7 @@ def eval(data, model):
             num_sents += batch_size
             num_words += batch_size*(length +1) # we implicitly generate </s> so we explicitly count it
             for b in range(batch_size):
-                span_b = [(a[0], a[1]) for a in argmax_spans[b]] #ignore labels
+                span_b = [(a[0].item(), a[1].item()) for a in argmax_spans[b]] #ignore labels
                 span_b_set = set(span_b[:-1])
                 gold_b_set = set(gold_spans[b][:-1])
                 tp, fp, fn = get_stats(span_b_set, gold_b_set)
@@ -211,3 +211,4 @@ def eval(data, model):
 if __name__ == '__main__':
     args = parser.parse_args()
     main(args)
+

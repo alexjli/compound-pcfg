@@ -13,10 +13,10 @@ from torch import cuda
 import numpy as np
 import time
 import logging
-from data import Dataset
+from data import BertDataset
 from torch.utils.data import DataLoader
 from utils import *
-from models import GeneralCompPCFG
+from models import CompBertPCFG
 from torch.nn.init import xavier_uniform_
 import datetime
 
@@ -53,14 +53,15 @@ parser.add_argument('--seed', default=3435, type=int, help='random seed')
 parser.add_argument('--print_every', type=int, default=1000, help='print stats after N batches')
 parser.add_argument('--prior', type = str, default = "normal", help='prior from which z is drawn')
 parser.add_argument('--vpost', type = str, default = "normal", help='distribution used to approximate variational posterior')
-
+parser.add_argument('--dummy', type = int, default = 0, help="used for output checking")
 def main(args):
-  np.random.seed(args.seed)
-  torch.manual_seed(args.seed)
-  train_data = Dataset(args.train_file)
-  val_data = Dataset(args.val_file)
-  #train_loader = DataLoader(dataset=train_data, shuffle=True)
-  #val_loader = DataLoader(dataset=val_data, shuffle=True)
+  if args.seed != -1:
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+  train_data = BertDataset(args.train_file)
+  val_data = BertDataset(args.val_file)
+  #train_loader = DataLoader(dataset=train_data, shuffle=True, batch_size=2)
+  #val_loader = DataLoader(dataset=val_data, shuffle=True, batch_size=2)
   train_sents = train_data.batch_size.sum()
   vocab_size = int(train_data.vocab_size)
   max_len = max(val_data.sents.size(1), train_data.sents.size(1))
@@ -69,7 +70,7 @@ def main(args):
   print('Vocab size: %d, Max Sent Len: %d' % (vocab_size, max_len))
   print('Save Path', args.save_path)
   #cuda.set_device(args.gpu)
-  model = GeneralCompPCFG(vocab = vocab_size,
+  model = CompBertPCFG(vocab = vocab_size,
                    state_dim = args.state_dim,
                    t_states = args.t_states,
                    nt_states = args.nt_states,
@@ -82,7 +83,7 @@ def main(args):
   base_gpu = torch.device('cuda:0')
   model.to(base_gpu)
   model = BetterDataParallel(model)
-  
+
 
   for name, param in model.named_parameters():
     if param.dim() > 1:
@@ -109,19 +110,20 @@ def main(args):
     n_gpus = torch.cuda.device_count()
     for i in np.random.permutation(len(train_data)):
       b += 1
-      sents, length, batch_size, _, gold_spans, gold_binary_trees, _ = train_data[i]
+      #current_device = next(model.parameters()).device
+      sents, bert, length, batch_size, _, gold_spans, gold_binary_trees, _ = train_data[i]
       if length > args.max_length or length == 1: #length filter based on curriculum
         continue
-      with open("batchsize.log", 'a') as fp:
-        fp.write(str(batch_size) + "\n")
-      if batch_size == 0 or batch_size %  n_gpus != 0:
+      if batch_size < n_gpus or batch_size % n_gpus != 0:
         continue
+      with open("batchsize.log", 'a') as fp:
+          fp.write(str(batch_size) + "\n")
       #if batch_size == 0 or batch_size % num_gpus != 0:   #gpu paraellization filter
       #  continue
       # sents = sents.cuda()
       #sents = sents.to(base_gpu)
       optimizer.zero_grad()
-      nll, kl, binary_matrix, argmax_spans = model(sents, argmax=True)
+      nll, kl, binary_matrix, argmax_spans = model(sents, bert, argmax=True)
       (nll+kl).mean().backward()
       train_nll += nll.sum().item()
       train_kl += kl.sum().item()
@@ -152,7 +154,7 @@ def main(args):
         sent_str = [train_data.idx2word[word_idx] for word_idx in list(sents[0].cpu().numpy())]
         print("Pred Tree: %s" % get_tree(action, sent_str))
         print("Gold Tree: %s" % get_tree(gold_binary_trees[0], sent_str))
-        with open("dummy_output.log", 'a') as fp:
+        with open("dummy_output_bert%d.log" % args.dummy, 'a') as fp:
           fp.write(log_str %
               (epoch, b, len(train_data), param_norm, gparam_norm, args.lr,
                np.exp(train_nll / num_words), train_kl /num_sents,
@@ -160,10 +162,7 @@ def main(args):
                all_f1[0], num_sents / (time.time() - start_time)) + "\n")
           e = datetime.datetime.now()
           fp.write("The time is now: = %s:%s:%s" % (e.hour, e.minute, e.second) + "\n")
-      with open("gpu_stats.log", "a") as fp:
-        for i in range(torch.cuda.device_count()):
-          fp.write("GPU %d: %d\n" % (i, torch.cuda.max_memory_allocated("cuda:"+str(i))))
-        fp.write("\n") 
+
 
 
     args.max_length = min(args.final_max_length, args.max_length + args.len_incr)
@@ -185,7 +184,7 @@ def main(args):
       torch.save(checkpoint, args.save_path)
       # model.cuda()
       model.to(base_gpu)
-      
+
 def eval(data, model):
   model.eval()
   # no need to parallelize because input model should be parallel
@@ -198,10 +197,10 @@ def eval(data, model):
   n_gpus = torch.cuda.device_count()
   with torch.no_grad():
     for i in range(len(data)):
-      sents, length, batch_size, _, gold_spans, gold_binary_trees, other_data = data[i]
+      sents, bert, length, batch_size, _, gold_spans, gold_binary_trees, other_data = data[i]
       if length == 1:
         continue
-      if batch_size == 0 or batch_size %  n_gpus != 0:
+      if batch_size < n_gpus or batch_size % n_gpus != 0:
         continue
       #if batch_size == 0 or batch_size % num_gpus != 0:   #gpu paraellization filter
       #  continue
@@ -209,7 +208,7 @@ def eval(data, model):
       # note that for unsuperised parsing, we should do model(sents, argmax=True, use_mean = True)
       # but we don't for eval since we want a valid upper bound on PPL for early stopping
       # see eval.py for proper MAP inference
-      nll, kl, binary_matrix, argmax_spans = model(sents, argmax=True)
+      nll, kl, binary_matrix, argmax_spans = model(sents, bert, argmax=True)
       total_nll += nll.sum().item()
       total_kl  += kl.sum().item()
       num_sents += batch_size

@@ -16,7 +16,7 @@ import logging
 from data import Dataset
 from torch.utils.data import DataLoader
 from utils import *
-from models import GeneralCompPCFG
+from models import CompPCFG
 from torch.nn.init import xavier_uniform_
 import datetime
 
@@ -69,15 +69,13 @@ def main(args):
   print('Vocab size: %d, Max Sent Len: %d' % (vocab_size, max_len))
   print('Save Path', args.save_path)
   #cuda.set_device(args.gpu)
-  model = GeneralCompPCFG(vocab = vocab_size,
+  model = CompPCFG(vocab = vocab_size,
                    state_dim = args.state_dim,
                    t_states = args.t_states,
                    nt_states = args.nt_states,
                    h_dim = args.h_dim,
                    w_dim = args.w_dim,
-                   z_dim = args.z_dim,
-                   prior = args.prior,
-                   vpost = args.vpost)
+                   z_dim = args.z_dim)
   # model parallelize
   base_gpu = torch.device('cuda:0')
   model.to(base_gpu)

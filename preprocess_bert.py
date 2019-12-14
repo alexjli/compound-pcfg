@@ -8,11 +8,16 @@ import os
 import sys
 import argparse
 import numpy as np
-import pickle
+import pickle, hickle
 import itertools
 from collections import defaultdict
 import utils
 import re
+from tqdm import tqdm
+import json
+
+from transformers import BertTokenizer, BertModel
+import torch
 
 class Indexer:
     def __init__(self, symbols = ["<pad>","<unk>","<s>","</s>"]):
@@ -23,7 +28,7 @@ class Indexer:
         self.EOS = symbols[3]
         self.d = {self.PAD: 0, self.UNK: 1, self.BOS: 2, self.EOS: 3}
         self.idx2word = {}
-        
+
     def add_w(self, ws):
         for w in ws:
             if w not in self.d:
@@ -72,7 +77,7 @@ def is_next_open_bracket(line, start_idx):
             return True
         elif char == ')':
             return False
-    raise IndexError('Bracket possibly not balanced, open bracket not followed by closed bracket')    
+    raise IndexError('Bracket possibly not balanced, open bracket not followed by closed bracket')
 
 def get_between_brackets(line, start_idx):
     output = []
@@ -80,7 +85,7 @@ def get_between_brackets(line, start_idx):
         if char == ')':
             break
         assert not(char == '(')
-        output.append(char)    
+        output.append(char)
     return ''.join(output)
 
 def get_tags_tokens_lowercase(line):
@@ -88,7 +93,7 @@ def get_tags_tokens_lowercase(line):
     line_strip = line.rstrip()
     for i in range(len(line_strip)):
         if i == 0:
-            assert line_strip[i] == '('    
+            assert line_strip[i] == '('
         if line_strip[i] == '(' and not(is_next_open_bracket(line_strip, i)): # fulfilling this condition means this is a terminal symbol
             output.append(get_between_brackets(line_strip, i))
     #print 'output:',output
@@ -98,11 +103,11 @@ def get_tags_tokens_lowercase(line):
     for terminal in output:
         terminal_split = terminal.split()
         # print(terminal, terminal_split)
-        assert len(terminal_split) == 2 # each terminal contains a POS tag and word        
+        assert len(terminal_split) == 2 # each terminal contains a POS tag and word
         output_tags.append(terminal_split[0])
         output_tokens.append(terminal_split[1])
         output_lowercase.append(terminal_split[1].lower())
-    return [output_tags, output_tokens, output_lowercase]    
+    return [output_tags, output_tokens, output_lowercase]
 
 def get_nonterminal(line, start_idx):
     assert line[start_idx] == '(' # make sure it's an open bracket
@@ -126,7 +131,7 @@ def get_actions(line):
             if is_next_open_bracket(line_strip, i): # open non-terminal
                 curr_NT = get_nonterminal(line_strip, i)
                 output_actions.append('NT(' + curr_NT + ')')
-                i += 1  
+                i += 1
                 while line_strip[i] != '(': # get the next open bracket, which may be a terminal or another non-terminal
                     i += 1
             else: # it's a terminal symbol
@@ -143,7 +148,7 @@ def get_actions(line):
              i += 1
              while line_strip[i] != ')' and line_strip[i] != '(':
                  i += 1
-    assert i == max_idx  
+    assert i == max_idx
     return output_actions
 
 def pad(ls, length, symbol):
@@ -151,12 +156,24 @@ def pad(ls, length, symbol):
         return ls[:length]
     return ls + [symbol] * (length -len(ls))
 
-def clean_number(w):    
+def padnumpy(ls, length, symbol):
+    if len(ls) >= length:
+        return ls[:length]
+    old_len = len(ls)
+    for i in range(length - old_len):
+        ls = np.concatenate((ls, symbol))
+    return ls
+
+def clean_number(w):
     new_w = re.sub('[0-9]{1,}([,.]?[0-9]*)*', 'N', w)
     return new_w
 
 def get_data(args):
     indexer = Indexer(["<pad>","<unk>","<s>","</s>"])
+    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+    model = BertModel.from_pretrained('bert-base-uncased')
+    model.eval()
+    model.to(0)
 
     def make_vocab(textfile, seqlength, minseqlength, lowercase, replace_num,
                    train=1, apply_length_filter=1):
@@ -165,7 +182,7 @@ def get_data(args):
         for tree in open(textfile, 'r'):
             tree = tree.strip()
             tags, sent, sent_lower = get_tags_tokens_lowercase(tree)
-            
+
             assert(len(tags) == len(sent))
             if lowercase == 1:
                 sent = sent_lower
@@ -180,18 +197,19 @@ def get_data(args):
                     indexer.vocab[word] += 1
         return num_sents, max_seqlength
 
-    def convert(textfile, lowercase, replace_num,  
+    def convert(textfile, lowercase, replace_num,
                 batchsize, seqlength, minseqlength, outfile, num_sents, max_sent_l=0,
                 shuffle=0, include_boundary=1, apply_length_filter=1):
         newseqlength = seqlength
         if include_boundary == 1:
             newseqlength += 2 #add 2 for EOS and BOS
         sents = np.zeros((num_sents, newseqlength), dtype=int)
+        sents_bert = np.zeros((num_sents, newseqlength, 768))
         sent_lengths = np.zeros((num_sents,), dtype=int)
         dropped = 0
         sent_id = 0
         other_data = []
-        for tree in open(textfile, 'r'):
+        for tree in tqdm(open(textfile, 'r')):
             tree = tree.strip()
             action = get_actions(tree)
             tags, sent, sent_lower = get_tags_tokens_lowercase(tree)
@@ -204,6 +222,15 @@ def get_data(args):
             if (len(sent) > seqlength and apply_length_filter == 1) or len(sent) < minseqlength:
                 continue
 
+            input_ids = torch.tensor(tokenizer.encode(sent_str, add_special_tokens=True)).unsqueeze(0).cuda()  # Batch size 1
+            bert_outputs = model(input_ids)
+            bert_hs = bert_outputs[0]
+            bert_hs = bert_hs[0].detach().cpu().numpy()
+            #print(bert_hs, bert_hs.shape)
+            bert_hs_pad = padnumpy(bert_hs, newseqlength, np.zeros((1, 768)))
+            sents_bert[sent_id] = bert_hs_pad
+            #print(bert_maxpool_pad, bert_maxpool_pad.shape)
+
             if include_boundary == 1:
                 sent = [indexer.BOS] + sent + [indexer.EOS]
             max_sent_l = max(len(sent), max_sent_l)
@@ -211,7 +238,7 @@ def get_data(args):
             sents[sent_id] = np.array(indexer.convert_sequence(sent_pad), dtype=int)
             sent_lengths[sent_id] = (sents[sent_id] != 0).sum()
             span, binary_actions, nonbinary_actions = utils.get_nonbinary_spans(action)
-            other_data.append([sent_str, tags, action, 
+            other_data.append([sent_str, tags, action,
                                binary_actions, nonbinary_actions, span, tree])
             assert(2*(len(sent)- 2) - 1 == len(binary_actions))
             assert(sum(binary_actions) + 1 == len(sent) - 2)
@@ -222,6 +249,7 @@ def get_data(args):
         if shuffle == 1:
             rand_idx = np.random.permutation(sent_id)
             sents = sents[rand_idx]
+            sents_bert = sents_bert[rand_idx]
             sent_lengths = sent_lengths[rand_idx]
             other_data = [other_data[idx] for idx in rand_idx]
 
@@ -230,6 +258,7 @@ def get_data(args):
         sent_lengths = sent_lengths[:sent_id]
         sent_sort = np.argsort(sent_lengths)
         sents = sents[sent_sort]
+        sents_bert = sents_bert[sent_sort]
         other_data = [other_data[idx] for idx in sent_sort]
         sent_l = sent_lengths[sent_sort]
         curr_l = 1
@@ -251,12 +280,13 @@ def get_data(args):
                 curr_idx = min(curr_idx + batchsize, l_location[i+1])
                 batch_idx.append(curr_idx)
         for i in range(len(batch_idx)-1):
-            batch_size_trimmed =((batch_idx[i+1] - batch_idx[i])//args.ngpus) * args.ngpus
+            batch_size_trimmed = ((batch_idx[i+1] - batch_idx[i])//args.ngpus) * args.ngpus
             batch_l.append(batch_size_trimmed)
             batch_w.append(sent_l[batch_idx[i]])
 
         # Write output
         f = {}
+        f["source_bert"] = sents_bert
         f["source"] = sents
         f["other_data"] = other_data
         f["batch_l"] = np.array(batch_l, dtype=int)
@@ -266,25 +296,26 @@ def get_data(args):
         f["vocab_size"] = np.array([len(indexer.d)])
         f["idx2word"] = indexer.idx2word
         f["word2idx"] = {word : idx for idx, word in indexer.idx2word.items()}
-        
+
         print("Saved {} sentences (dropped {} due to length/unk filter)".format(
             len(f["source"]), dropped))
-        pickle.dump(f, open(outfile, 'wb'))
+        # print(f["source_bert"])
+        pickle.dump(f, open(outfile, "wb"), protocol=pickle.HIGHEST_PROTOCOL)
         return max_sent_l
 
     print("First pass through data to get vocab...")
     num_sents_train, train_seqlength = make_vocab(args.trainfile, args.seqlength, args.minseqlength,
                                                   args.lowercase, args.replace_num, 1, 1)
     print("Number of sentences in training: {}".format(num_sents_train))
-    num_sents_valid, valid_seqlength = make_vocab(args.valfile, args.seqlength, args.minseqlength, 
+    num_sents_valid, valid_seqlength = make_vocab(args.valfile, args.seqlength, args.minseqlength,
                                                   args.lowercase, args.replace_num, 0, 0)
     print("Number of sentences in valid: {}".format(num_sents_valid))
-    num_sents_test, test_seqlength = make_vocab(args.testfile, args.seqlength, args.minseqlength, 
+    num_sents_test, test_seqlength = make_vocab(args.testfile, args.seqlength, args.minseqlength,
                                                 args.lowercase, args.replace_num, 0, 0)
     print("Number of sentences in test: {}".format(num_sents_test))
 
     if args.vocabminfreq >= 0:
-        indexer.prune_vocab(args.vocabminfreq, True)        
+        indexer.prune_vocab(args.vocabminfreq, True)
     else:
         indexer.prune_vocab(args.vocabsize, False)
     if args.vocabfile != '':
@@ -295,15 +326,15 @@ def get_data(args):
                                                           len(indexer.d)))
     print(train_seqlength, valid_seqlength, test_seqlength)
     max_sent_l = 0
-    max_sent_l = convert(args.testfile, args.lowercase, args.replace_num, 
-                         args.batchsize, test_seqlength, args.minseqlength, 
+    max_sent_l = convert(args.testfile, args.lowercase, args.replace_num,
+                         args.batchsize, test_seqlength, args.minseqlength,
                          args.outputfile + "-test.pkl", num_sents_test,
                          max_sent_l, args.shuffle, args.include_boundary, 0)
-    max_sent_l = convert(args.valfile, args.lowercase, args.replace_num, 
-                         args.batchsize, valid_seqlength, args.minseqlength, 
+    max_sent_l = convert(args.valfile, args.lowercase, args.replace_num,
+                         args.batchsize, valid_seqlength, args.minseqlength,
                          args.outputfile + "-val.pkl", num_sents_valid,
                          max_sent_l, args.shuffle, args.include_boundary, 0)
-    max_sent_l = convert(args.trainfile, args.lowercase, args.replace_num, 
+    max_sent_l = convert(args.trainfile, args.lowercase, args.replace_num,
                          args.batchsize, args.seqlength,  args.minseqlength,
                          args.outputfile + "-train.pkl", num_sents_train,
                          max_sent_l, args.shuffle, args.include_boundary, 1)
@@ -320,9 +351,9 @@ def main(arguments):
     parser.add_argument('--vocabminfreq', help="Minimum frequency for vocab. Use this instead of "
                                                 "vocabsize if > 0",
                                                 type=int, default=-1)
-    parser.add_argument('--include_boundary', help="Add BOS/EOS tokens", type=int, default=1)        
-    parser.add_argument('--lowercase', help="Lower case", type=int, default=1)        
-    parser.add_argument('--replace_num', help="Replace numbers with N", type=int, default=1)        
+    parser.add_argument('--include_boundary', help="Add BOS/EOS tokens", type=int, default=1)
+    parser.add_argument('--lowercase', help="Lower case", type=int, default=1)
+    parser.add_argument('--replace_num', help="Replace numbers with N", type=int, default=1)
     parser.add_argument('--trainfile', help="Path to training data.", required=True)
     parser.add_argument('--valfile', help="Path to validation data.", required=True)
     parser.add_argument('--testfile', help="Path to test validation data.", required=True)
@@ -340,7 +371,7 @@ def main(arguments):
     parser.add_argument('--shuffle', help="If = 1, shuffle sentences before sorting (based on  "
                                            "source length).",
                                           type = int, default = 0)
-    parser.add_argument('--ngpus', type = int, default = 1, help = "number of gpus that will be used in training")
+    parser.add_argument('--ngpus', type = int, default = 1, help="number of gpus to be used during training")
     args = parser.parse_args(arguments)
     np.random.seed(3435)
     get_data(args)
